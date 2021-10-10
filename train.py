@@ -65,11 +65,11 @@ def train_overdl(dict_size, dl_method, coding_method_train, coding_method_eval, 
 
     # Metrics for overcomplete Dict
     dict_metric = dict.fromkeys(['distance', 'err_k1', 'err_k3'])
-    risk_metric = dict.fromkeys(['train', 'test', 'oracle'])
+    risk_metric = dict.fromkeys(['train', 'test', 'test_OMP', 'oracle'])
 
     # Metrics for Dict after Pruning
     dict_metric_prnd = dict.fromkeys(['distance', 'err_k1', 'err_k3'])
-    risk_metric_prnd = dict.fromkeys(['train', 'test', 'oracle'])
+    risk_metric_prnd = dict.fromkeys(['train', 'test', 'test_OMP', 'oracle'])
 
     for key in dict_metric:
         dict_metric[key] = np.zeros(n_trials)
@@ -78,7 +78,6 @@ def train_overdl(dict_size, dl_method, coding_method_train, coding_method_eval, 
         risk_metric[key] = np.zeros(n_trials)
         risk_metric_prnd[key] = np.zeros(n_trials)
 
-    ranks_sparse_code = np.zeros(n_trials)
     for trial in range(n_trials):
         # generate dictionary and data
         dictionary, X, X_test = gen_data(n_components, n_features, sparsity, train_size, test_size, dict_init, nnz_init,
@@ -91,12 +90,13 @@ def train_overdl(dict_size, dl_method, coding_method_train, coding_method_eval, 
             model.update_dict(X, lambd, method=dl_method, mode=mode, num_iter=num_iter, clean=clean,
                               batch_size=batch_size)
         dict_raw = model.rdict.T
-        d_metric, r_metric = model.eval_dict(dictionary, X, X_test, lambd, coding_method_eval,
-                                             test_sparsity=sparsity_test)
+        d_metric, r_metric = model.eval_dict(dictionary, X, X_test, lambd, coding_method_eval, test_sparsity=sparsity_test,
+                                             return_regularization=False, specific_code=model.paired_code)
 
         # Pruning
         model.prune_dict(n_components, X_test, sparsity_prun, 'coding')
-        d_metric_prnd, r_metric_prnd = model.eval_dict(dictionary, X, X_test, lambd, coding_method_eval)
+        d_metric_prnd, r_metric_prnd = model.eval_dict(dictionary, X, X_test, lambd, coding_method_eval, test_sparsity=sparsity_test,
+                                                       return_regularization=False, specific_code=None)  # TODO prune_dict needs to modify specific_code
 
         for key in dict_metric:
             dict_metric[key][trial] = d_metric[key]
@@ -104,6 +104,5 @@ def train_overdl(dict_size, dl_method, coding_method_train, coding_method_eval, 
         for key in risk_metric:
             risk_metric[key][trial] = r_metric[key]
             risk_metric_prnd[key][trial] = r_metric_prnd[key]
-        ranks_sparse_code[trial] = model.rank_sparse_code
 
-    return dict_metric, risk_metric, dict_metric_prnd, risk_metric_prnd, ranks_sparse_code
+    return dict_metric, risk_metric, dict_metric_prnd, risk_metric_prnd

@@ -15,7 +15,8 @@ Modified all functions to work with X, D, R of consistent dimensions
 # make the other functions "mine"
 
 
-def eval_objective(X, D, sparsity, lambd, package='spams', coding_method='L1', return_regularization=False):
+def eval_objective(X, D, sparsity, lambd, package='spams', coding_method='L1',
+                   return_regularization=False, specific_code=None):
     """ Computes the objective value of the following optimization problem
         min (0.5 || X - D * code ||_F^2 + lambd * || code ||_1) / n_samples
         code
@@ -36,22 +37,29 @@ def eval_objective(X, D, sparsity, lambd, package='spams', coding_method='L1', r
             coding method to be used, specified with spams or sklearn.sparse_encode argument string
         return_regularization (bool):
             if True, objective value computed with regularization added; otherwise, without
+        specific_code: array of shape (n_components, n_samples)
+            Sparse code matrix
 
     Returns:
         The objective value as a float.
     """
 
-    if package == 'spams':
-        if coding_method == 'L1':
-            param = {'mode': 2, 'lambda1': lambd}
-            code = spams.lasso(np.asfortranarray(X), D=np.asfortranarray(D), **param)
-        elif coding_method == 'L1_2':
-            param = {'mode': 0, 'lambda1': lambd, 'numThreads': 4}
-            code = spams.lasso(np.asfortranarray(X), D=np.asfortranarray(D), **param)
-        elif coding_method == 'OMP':
-            code = spams.omp(np.asfortranarray(X), D=np.asfortranarray(D), L=sparsity)
+    if specific_code is None:
+        assert package in ('spams', 'sklearn'), 'package argument needs to be "spams" or "sklearn".'
+        # ---------------------- compute code from data and dictionary ----------------------
+        if package == 'spams':
+            if coding_method == 'L1':
+                param = {'mode': 2, 'lambda1': lambd}
+                code = spams.lasso(np.asfortranarray(X), D=np.asfortranarray(D), **param)
+            elif coding_method == 'L1_2':
+                param = {'mode': 0, 'lambda1': lambd, 'numThreads': 4}
+                code = spams.lasso(np.asfortranarray(X), D=np.asfortranarray(D), **param)
+            elif coding_method == 'OMP':
+                code = spams.omp(np.asfortranarray(X), D=np.asfortranarray(D), L=sparsity)
+        elif package == 'sklearn':
+            code = sparse_encode(X.T, D.T, algorithm=coding_method, alpha=lambd, max_iter=5000)
     else:
-        code = sparse_encode(X.T, D.T, algorithm=coding_method, alpha=lambd, max_iter=5000)
+        code = specific_code
     obj = 0.5 * np.linalg.norm(X - D @ code, ord='fro')**2
 
     if return_regularization:

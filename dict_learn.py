@@ -11,7 +11,7 @@ From dictlearning_prun.py, with minor modifications
 
 
 def dict_learning(X, dict_size, lambd, method='spams', mode=2, init_rdict=None, num_iter=1000, clean=True,
-                  step_size=0.1, batch_size=100):
+                  step_size=0.1, batch_size=100, full_rank_only=True):
     """Solves a dictionary learning matrix factorization problem.--
 
     Finds the best dictionary and the corresponding sparse code for
@@ -79,7 +79,6 @@ def dict_learning(X, dict_size, lambd, method='spams', mode=2, init_rdict=None, 
     # (2) Gina is a lazy, messy coder.
     # --------------------------------------------------------------------
     elif method == 'MOD1':
-        # -------- keep initializing until you get a full rank code, then work with that --------
         rdict = np.random.normal(size=(X.shape[0], dict_size))
         rdict = normalize(rdict, axis=0)
 
@@ -87,22 +86,26 @@ def dict_learning(X, dict_size, lambd, method='spams', mode=2, init_rdict=None, 
         code = rdict.T @ X
         code = k_thresholding(code, lambd)
 
-        while( np.linalg.matrix_rank(code) != code.shape[1] ):
-            rdict = np.random.normal(size=(X.shape[0], dict_size))
-            rdict = normalize(rdict, axis=0)
+        # keep initializing dictionary until full rank code is returned
+        if code.shape[0] >= code.shape[1] and full_rank_only:
+            while( np.linalg.matrix_rank(code) != code.shape[1] ):
+                rdict = np.random.normal(size=(X.shape[0], dict_size))
+                rdict = normalize(rdict, axis=0)
 
-            # sparse coding step: "k-thresholding"
-            code = rdict.T @ X
-            code = k_thresholding(code, lambd)
+                # sparse coding step: "k-thresholding"
+                code = rdict.T @ X
+                code = k_thresholding(code, lambd)
 
         # dictionary update step
         rdict = X @ np.linalg.pinv(code)
-        normed_rdict = normalize(rdict, axis=0)
 
-        return normed_rdict, np.linalg.norm(X - rdict @ code, ord='fro')
+        # normalize dictionary (by adjusting rows of code)
+        rdict, dict_norm_coefficients = normalize(rdict, axis=0, return_norm=True)
+        code = code * dict_norm_coefficients[:, None]
+
+        return rdict, code
 
     elif method == 'MOD_dict':
-        # -------- keep initializing until you get a full rank code, then work with that --------
         rdict = np.random.normal(size=(X.shape[0], dict_size))
         rdict = normalize(rdict, axis=0)
 
@@ -110,29 +113,33 @@ def dict_learning(X, dict_size, lambd, method='spams', mode=2, init_rdict=None, 
         code = rdict.T @ X
         code = k_thresholding(code, lambd)
 
-        while( np.linalg.matrix_rank(code) != code.shape[1] ):
-            rdict = np.random.normal(size=(X.shape[0], dict_size))
-            rdict = normalize(rdict, axis=0)
+        # keep initializing dictionary until full rank code is returned
+        if code.shape[0] >= code.shape[1] and full_rank_only:
+            while( np.linalg.matrix_rank(code) != code.shape[1] ):
+                rdict = np.random.normal(size=(X.shape[0], dict_size))
+                rdict = normalize(rdict, axis=0)
 
-            # sparse coding step: "k-thresholding"
-            code = rdict.T @ X
-            code = k_thresholding(code, lambd)
+                # sparse coding step: "k-thresholding"
+                code = rdict.T @ X
+                code = k_thresholding(code, lambd)
 
         for _ in range(500):
             # dictionary gradient descent
             lr = 1/eigsh(code.T @ code, 1, which='LA', return_eigenvectors=False)[0]
             rdict = rdict - lr * ( -2.0 * (X - rdict @ code) @ code.T )
-            rdict = normalize(rdict, axis=0)
+
+            # normalize dictionary (by adjusting rows of code)
+            rdict, dict_norm_coefficients = normalize(rdict, axis=0, return_norm=True)
+            code = code * dict_norm_coefficients[:, None]
 
             # should probably get a better stopping condition
             if np.linalg.norm(X - rdict @ code, ord='fro') <= 1e-12:
                 print('break1')
                 break
 
-        return rdict, np.linalg.norm(X - rdict @ code, ord='fro')
+        return rdict, code
 
     elif method == 'MOD_em':
-        # -------- keep initializing until you get a full rank code, then work with that --------
         rdict = np.random.normal(size=(X.shape[0], dict_size))
         rdict = normalize(rdict, axis=0)
 
@@ -140,34 +147,42 @@ def dict_learning(X, dict_size, lambd, method='spams', mode=2, init_rdict=None, 
         code = rdict.T @ X
         code = k_thresholding(code, lambd)
 
-        while( np.linalg.matrix_rank(code) != code.shape[1] ):
-            rdict = np.random.normal(size=(X.shape[0], dict_size))
-            rdict = normalize(rdict, axis=0)
+        # keep initializing dictionary until full rank code is returned
+        if code.shape[0] >= code.shape[1] and full_rank_only:
+            while( np.linalg.matrix_rank(code) != code.shape[1] ):
+                rdict = np.random.normal(size=(X.shape[0], dict_size))
+                rdict = normalize(rdict, axis=0)
 
-            # sparse coding step: "k-thresholding"
-            code = rdict.T @ X
-            code = k_thresholding(code, lambd)
+                # sparse coding step: "k-thresholding"
+                code = rdict.T @ X
+                code = k_thresholding(code, lambd)
+
+        # dictionary update step
+        lr = 1/eigsh(code.T @ code, 1, which='LA', return_eigenvectors=False)[0]
+        rdict = rdict - lr * ( -2.0 * (X - rdict @ code) @ code.T )
+
+        # normalize dictionary
+        rdict, dict_norm_coefficients = normalize(rdict, axis=0, return_norm=True)
 
         for iter in range(500):
-            # dictionary update step
-            lr = 1/eigsh(code.T @ code, 1, which='LA', return_eigenvectors=False)[0]
-            rdict = rdict - lr * ( -2.0 * (X - rdict @ code) @ code.T )
-            rdict = normalize(rdict, axis=0)
-
             # sparse coding step: "k-thresholding"
             code = rdict.T @ X
             code = k_thresholding(code, lambd)
+
+            # dictionary update step
+            lr = 1 / eigsh(code.T @ code, 1, which='LA', return_eigenvectors=False)[0]
+            rdict = rdict - lr * (-2.0 * (X - rdict @ code) @ code.T)
+
+            # normalize dictionary (by adjusting rows of code)
+            rdict, dict_norm_coefficients = normalize(rdict, axis=0, return_norm=True)
+            code = code * dict_norm_coefficients[:, None]
 
             # should probably get a better stopping condition
             if np.linalg.norm(X - rdict @ code, ord='fro') <= 1e-12:
                 print('break2')
                 break
 
-        lr = 1/eigsh(code.T @ code, 1, which='LA', return_eigenvectors=False)[0]
-        rdict = rdict - lr * (-2.0 * (X - rdict @ code) @ code.T)
-        rdict = normalize(rdict, axis=0)
-
-        return rdict, np.linalg.norm(X - rdict @ code, ord='fro')
+        return rdict, code
 
     elif method == 'MOD1_omp':
         for iter in range(1):
@@ -178,6 +193,6 @@ def dict_learning(X, dict_size, lambd, method='spams', mode=2, init_rdict=None, 
             rdict = X @ np.linalg.pinv(code)
             rdict = normalize(rdict, axis=0)
         # https://stackoverflow.com/questions/54858314/rank-of-sparse-matrix-python
-        return rdict, np.linalg.matrix_rank(code)
+        return rdict, code
 
-    return rdict
+    return rdict, code

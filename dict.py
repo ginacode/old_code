@@ -5,6 +5,8 @@ import spams
 from dict_learn import dict_learning
 from dict_eval import eval_objective, eval_dict_distance, compute_dict_k_distance
 
+from utils import k_thresholding # there has to be a better way
+
 """
 From dictlearning_prun.py, with minor modifications
 """
@@ -14,10 +16,11 @@ From dictlearning_prun.py, with minor modifications
 class Dictionary(object):
     """ Class for dictionary learning and evaluation
     """
-    def __init__(self, dict_size, n_features, sparsity, coding_method):
+    def __init__(self, dict_size, n_features, sparsity, paired_code = None):
         self.dict_size = dict_size
         self.n_features = n_features
         self.sparsity = sparsity
+        self.paired_code = paired_code  # code to evaluate with the dictionary
         self.reset_dict()
 
     def reset_dict(self):
@@ -27,16 +30,18 @@ class Dictionary(object):
 
     def update_dict(self, X, lambd, method='spams', mode=2, num_iter=1000, clean=True, step_size=0.1, batch_size=100):
         # Update dictionary with training data
-        if method == 'MOD1' or method == 'MOD_dict' or method == 'MOD_em' or method == 'MOD1_omp':
-            self.rdict, self.rank_sparse_code = dict_learning(X.T, self.dict_size, lambd, method=method, mode=mode,
-                                                              init_rdict=self.rdict.T, num_iter=num_iter, clean=clean,
-                                                              step_size=step_size, batch_size=batch_size)
+        if method == 'spams':
+            self.rdict = dict_learning(X.T, self.dict_size, lambd, method=method, mode=mode,
+                                       init_rdict=self.rdict.T, num_iter=num_iter, clean=clean,
+                                       step_size=step_size, batch_size=batch_size, full_rank_only=False)
         else:
-            self.rdict = dict_learning(X.T, self.dict_size, lambd, method=method, mode=mode, init_rdict=self.rdict.T,
-                                       num_iter=num_iter, clean=clean, step_size=step_size, batch_size=batch_size)
+            self.rdict, self.paired_code = dict_learning(X.T, self.dict_size, lambd, method=method, mode=mode,
+                                                         init_rdict=self.rdict.T, num_iter=num_iter, clean=clean,
+                                                         step_size=step_size, batch_size=batch_size, full_rank_only=False)
         self.rdict = self.rdict.T
 
-    def eval_dict(self, dictionary, X, X_test, lambd, coding_method, test_sparsity=''):
+    def eval_dict(self, dictionary, X, X_test, lambd, coding_method, test_sparsity='',
+                  return_regularization=False, specific_code=None):
         dictionary = dictionary.T
         X = X.T
         X_test = X_test.T
@@ -48,22 +53,25 @@ class Dictionary(object):
                        'err_k1': compute_dict_k_distance(dictionary, self.rdict.T, 1, t=1000),
                        'err_k3': compute_dict_k_distance(dictionary, self.rdict.T, 3, t=1000)}
 
+        code = k_thresholding(self.rdict @ X_test, self.sparsity)
         risk_metric = {'train': eval_objective(X, self.rdict.T, test_sparsity, lambd,
                                                package='spams', coding_method=coding_method,
-                                               return_regularization=False),
+                                               return_regularization=return_regularization, specific_code=specific_code),
                        'test': eval_objective(X_test, self.rdict.T, test_sparsity, lambd,
                                               package='spams', coding_method=coding_method,
-                                              return_regularization=False),
+                                              return_regularization=return_regularization, specific_code=code),
+                       'test_OMP': eval_objective(X_test, self.rdict.T, test_sparsity, lambd,
+                                              package='spams', coding_method=coding_method,
+                                              return_regularization=return_regularization, specific_code=None),
                        'oracle': eval_objective(X_test, dictionary, test_sparsity, lambd,
                                                 package='spams', coding_method=coding_method,
-                                                return_regularization=False)}
+                                                return_regularization=return_regularization, specific_code=None)}
         return dict_metric, risk_metric
 
     def prune_dict(self, m_target, X_test, sparsity, method):
         if method == "incoherence":
             D = self.rdict.T
             (n, m) = D.shape
-            cnt = 0
 
             if m > m_target:
                 G = np.abs(D.T.dot(D)) - np.eye(m)
